@@ -17,7 +17,7 @@ using namespace std;
 #define S_ROWS				4
 #define S_COLUMNS			256	
 
-bool debug = false; // if true, additional messages are displayed. If false, output has a propriet format for batch processing
+bool debug = true; // if true, additional messages are displayed. If false, output has a propriet format for batch processing
 
 uint32_t P[BLOWFISH_ROUNDS + 2] = { 0 };    // Blowfish round keys
 uint32_t S[S_ROWS * S_COLUMNS] = { 0 };     // key dependent S-boxes
@@ -548,7 +548,7 @@ int main(int argc, char *argv[])
 
 
 	// config input/output files:
-	string plainFilename = "input-32m.txt";
+	string plainFilename = "input-16k.txt";
 	if (argc > 1)
 	{
 		plainFilename = argv[1];
@@ -602,6 +602,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	outputText = new char[fileLength];
+
 	auto timestampFileLoaded = chrono::high_resolution_clock::now(); // time capture	
 	auto fileLoading = FpMilliseconds(timestampFileLoaded - timestampSubkeysGenerated);
 
@@ -614,25 +616,141 @@ int main(int argc, char *argv[])
 		cout << fileLoading.count() << ";";
 
 
-	// ENCRYPTION		
-	outputText = new char[extendedFileLength];
-	for (unsigned long int i = 0; i < extendedFileLength; i += 8)
+
+	// =============== OpenCL Part ====================
+
+	// thread config
+	bool autoThreadsConfig = true; // automatic threads config optimal for specific GPU device. If set true, values defined below will be ignored
+	unsigned long int numberOfThreads = 256 * 256 * 256; // global group size
+	unsigned int threadsGroupSize = 64; // local group size
+
+	// OpenCL init
+	cl_int status;
+	cl_uint num_platforms = 0;
+	status = clGetPlatformIDs(0, NULL, &num_platforms);
+	if (num_platforms == 0 || status != CL_SUCCESS)
 	{
-		// input block preparation
-		for (int j = 0; j < 8; ++j)
+		return EXIT_FAILURE;
+	}
+	vector<cl_platform_id> platforms(num_platforms);
+	status = clGetPlatformIDs(num_platforms, &platforms.front(), NULL);
+	const cl_device_type kDeviceType = CL_DEVICE_TYPE_GPU; // get GPU device
+	cl_device_id device;
+	cl_platform_id platform;
+	bool found = false;
+	for (cl_uint i = 0; i < num_platforms && !found; ++i)
+	{
+		cl_uint count = 0;
+		status = clGetDeviceIDs(platforms[i], kDeviceType, 1, &device, &count);
+		if (count == 1)
 		{
-			in[j] = inputText[i + j];
-		}
-
-		// encryption of block
-		blowfish_encrypt(P, S, in, out);
-
-		// output text prerparation
-		for (int j = 0; j < 8; ++j)
-		{
-			outputText[i + j] = out[j];
+			platform = platforms[i];
+			found = true;
 		}
 	}
+
+	// Create context
+	const cl_context_properties prop[] = { CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0 };
+	cl_context context = clCreateContextFromType(prop, kDeviceType, NULL, NULL, &status);
+
+	if (status != CL_SUCCESS) {
+		cout << "Creating OpenCL context failed. Error code: " << status << endl;
+	}
+
+	// create queue
+	cl_command_queue cmd_queue = clCreateCommandQueue(context, device, 0, &status);
+
+	// load opencl source
+	ifstream cl_file("kernel-blowfish-encrypt.cl");
+	if (cl_file.fail())
+	{
+		cout << "Error opening kernel file!" << endl;
+		std::system("PAUSE");
+		return 1;
+	}
+	string kernel_string(istreambuf_iterator<char>(cl_file), (istreambuf_iterator<char>()));
+	const char *src = kernel_string.c_str();
+
+	// create OpenCL program
+	cl_program program = clCreateProgramWithSource(context, 1, (const char**)&src, NULL, NULL);
+	status = clBuildProgram(program, 1, &device, NULL, NULL, NULL);
+	if (status != CL_SUCCESS) {
+		char log[1024] = {};
+		clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 1024, log, NULL);
+		cout << "Build log:\n" << log << endl;
+		std::system("PAUSE");
+		return EXIT_FAILURE;
+	}
+
+	// create KERNEL
+	cl_kernel kernel = clCreateKernel(program, "blowfish_encrypt", NULL);
+
+	// auto threads config
+	if (autoThreadsConfig)
+	{
+		size_t buf_sizet = 0;
+		clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(buf_sizet), &buf_sizet, NULL);
+		threadsGroupSize = (unsigned int)buf_sizet;
+		numberOfThreads = (unsigned long int)ceil((extendedFileLength / 8) / (float)threadsGroupSize) * threadsGroupSize;
+	}
+	if (debug)
+	{
+		cout << "threadsGroupSize:\t" << threadsGroupSize << endl;
+		cout << "numberOfThreads:\t" << numberOfThreads << endl;
+	}
+	
+
+	
+
+
+	// ENCRYPTION
+	// memory allocation for input and output buffors
+	//cl_mem in_text = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uchar) * (extendedFileLength + 1), inputText, NULL);
+	cl_mem in_text = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uchar) * extendedFileLength, inputText, NULL);
+	cl_mem in_P = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uint) * (BLOWFISH_ROUNDS + 2), P, NULL);
+	cl_mem in_S = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uint) * 4 * 256, S, NULL);
+	cl_mem out_text = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uchar) * extendedFileLength, NULL, NULL);
+	
+	
+	// send parameters to kernel
+	const cl_ulong cl_fileLength = extendedFileLength;
+	const cl_ulong cl_numberOfThreads = numberOfThreads;
+	clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&in_text);
+	clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&in_P);
+	clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&in_S);
+	clSetKernelArg(kernel, 3, sizeof(cl_mem), (void *)&out_text);
+	clSetKernelArg(kernel, 4, sizeof(cl_ulong), (void *)&cl_fileLength);
+	clSetKernelArg(kernel, 5, sizeof(cl_ulong), (void *)&cl_numberOfThreads);
+	
+	// create index space
+	const int dimensions = 1;
+	size_t offset[dimensions] = { 0 };
+	size_t global_threads[dimensions] = { numberOfThreads };
+	size_t local_threads[dimensions] = { threadsGroupSize };
+
+	// execute kernel
+	cl_event event;
+	status = clEnqueueNDRangeKernel(cmd_queue, kernel, dimensions, offset, global_threads, local_threads, 0, NULL, &event);
+	clWaitForEvents(1, &event); // wait for finish
+
+	// copy results to host
+	status = clEnqueueReadBuffer(cmd_queue, out_text, CL_TRUE, 0, extendedFileLength * sizeof(cl_uchar), outputText, 0, NULL, NULL);
+
+	// finalize
+	clFinish(cmd_queue);
+	
+
+	// cleanup
+	clReleaseMemObject(in_text);
+	clReleaseMemObject(in_P);
+	clReleaseMemObject(in_S);
+	clReleaseMemObject(out_text);
+	clReleaseKernel(kernel);
+	clReleaseProgram(program);
+	clReleaseCommandQueue(cmd_queue);
+	clReleaseContext(context);
+				
+	
 
 	auto timestampEncrypted = chrono::high_resolution_clock::now(); // time capture	
 	auto encryptionTime = FpMilliseconds(timestampEncrypted - timestampFileLoaded);
@@ -641,6 +759,11 @@ int main(int argc, char *argv[])
 		cout << "Text encrypted in\t" << encryptionTime.count() << " ms." << endl;
 	else
 		cout << encryptionTime.count() << ";";
+
+
+
+	// ============== OpenCL Part END ==================
+
 
 	// Save result to file			
 	ofstream output;
