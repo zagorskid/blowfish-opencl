@@ -548,7 +548,7 @@ int main(int argc, char *argv[])
 
 
 	// config input/output files:
-	string plainFilename = "input-16k.txt";
+	string plainFilename = "input-512m.txt";
 	if (argc > 1)
 	{
 		plainFilename = argv[1];
@@ -660,6 +660,16 @@ int main(int argc, char *argv[])
 	// create queue
 	cl_command_queue cmd_queue = clCreateCommandQueue(context, device, 0, &status);
 
+	auto timestampOpenCLinit = chrono::high_resolution_clock::now(); // time capture	
+	auto openCLinit = FpMilliseconds(timestampOpenCLinit - timestampFileLoaded);
+	if (debug)
+	{
+		cout << "OpenCL initialized in\t" << openCLinit.count() << " ms." << endl;
+	}
+	else
+		cout << openCLinit.count() << ";";
+
+
 	// load opencl source
 	ifstream cl_file("kernel-blowfish-encrypt.cl");
 	if (cl_file.fail())
@@ -700,12 +710,19 @@ int main(int argc, char *argv[])
 	}
 	
 
+	auto timestampLoadKernel = chrono::high_resolution_clock::now(); // time capture	
+	auto kernelLoaded = FpMilliseconds(timestampLoadKernel - timestampOpenCLinit);
+	if (debug)
+	{
+		cout << "Kernel loaded and compiled in\t" << kernelLoaded.count() << " ms." << endl;
+	}
+	else
+		cout << kernelLoaded.count() << ";";
 	
 
 
 	// ENCRYPTION
 	// memory allocation for input and output buffors
-	//cl_mem in_text = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uchar) * (extendedFileLength + 1), inputText, NULL);
 	cl_mem in_text = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uchar) * extendedFileLength, inputText, NULL);
 	cl_mem in_P = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uint) * (BLOWFISH_ROUNDS + 2), P, NULL);
 	cl_mem in_S = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uint) * 4 * 256, S, NULL);
@@ -728,16 +745,35 @@ int main(int argc, char *argv[])
 	size_t global_threads[dimensions] = { numberOfThreads };
 	size_t local_threads[dimensions] = { threadsGroupSize };
 
+	
 	// execute kernel
+	auto timestampKernerlExecutionStart = chrono::high_resolution_clock::now(); // time capture	
 	cl_event event;
 	status = clEnqueueNDRangeKernel(cmd_queue, kernel, dimensions, offset, global_threads, local_threads, 0, NULL, &event);
 	clWaitForEvents(1, &event); // wait for finish
+
+	auto timestampKernerlExecutionStop = chrono::high_resolution_clock::now(); // time capture	
+	auto kernelExecution = FpMilliseconds(timestampKernerlExecutionStop - timestampKernerlExecutionStart);
+
+	if (debug)
+		cout << "Kernel execution time:\t" << kernelExecution.count() << " ms." << endl;
+	else
+		cout << kernelExecution.count() << ";";
+
 
 	// copy results to host
 	status = clEnqueueReadBuffer(cmd_queue, out_text, CL_TRUE, 0, extendedFileLength * sizeof(cl_uchar), outputText, 0, NULL, NULL);
 
 	// finalize
 	clFinish(cmd_queue);
+
+	auto timestampEncrypted = chrono::high_resolution_clock::now(); // time capture	
+	auto encryptionTime = FpMilliseconds(timestampEncrypted - timestampLoadKernel);
+
+	if (debug)
+		cout << "Text encrypted in\t" << encryptionTime.count() << " ms." << endl;
+	else
+		cout << encryptionTime.count() << ";";
 	
 
 	// cleanup
@@ -751,14 +787,13 @@ int main(int argc, char *argv[])
 	clReleaseContext(context);
 				
 	
-
-	auto timestampEncrypted = chrono::high_resolution_clock::now(); // time capture	
-	auto encryptionTime = FpMilliseconds(timestampEncrypted - timestampFileLoaded);
+	auto timestampOpenCLfinish = chrono::high_resolution_clock::now(); // time capture	
+	auto OpenCLfinalize = FpMilliseconds(timestampOpenCLfinish - timestampEncrypted);
 
 	if (debug)
-		cout << "Text encrypted in\t" << encryptionTime.count() << " ms." << endl;
-	else
-		cout << encryptionTime.count() << ";";
+		cout << "OpenCL finalized in\t" << OpenCLfinalize.count() << " ms." << endl;
+	
+	
 
 
 
@@ -785,6 +820,9 @@ int main(int argc, char *argv[])
 	else
 		cout << fileSaving.count() << ";";
 
+	delete[] outputText;
+	delete[] inputText;
+
 	auto timestampStop = std::chrono::high_resolution_clock::now();
 	auto totalTime = FpMilliseconds(timestampStop - timestampStart);
 
@@ -793,10 +831,6 @@ int main(int argc, char *argv[])
 		cout << "Total time elapsed:\t" << totalTime.count() << " ms." << endl;
 	else
 		cout << totalTime.count() << ";" << endl;
-
-
-	delete[] outputText;
-	delete[] inputText;
 
 	if (debug)
 		system("PAUSE");
