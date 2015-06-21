@@ -1,4 +1,3 @@
-
 #define BLOWFISH_ROUNDS		16        
 #define BLOWFISH_BLOCKSIZE	8 
 #define S_ROWS				4
@@ -48,10 +47,6 @@ static unsigned int F(__global const unsigned int *S, unsigned int x)
 
 
 
-
-
-
-
 __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global const unsigned int* P, __global const unsigned int* S,
 	__global unsigned char* outputText, unsigned long int fileLength, unsigned long int numberOfThreads)
 {
@@ -76,8 +71,7 @@ __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global
 		{
 			inputBlock[j] = inputText[block_id + j];
 		}
-
-
+		
 
 		unsigned int  Xl, Xr, temp;
 		short i;
@@ -115,6 +109,5 @@ __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global
 		}
 
 	}
-	
-	
+		
 }
