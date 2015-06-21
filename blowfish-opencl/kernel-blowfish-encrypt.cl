@@ -49,8 +49,7 @@ static unsigned int F(__global const unsigned int *S, unsigned int x)
 
 __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global const unsigned int* P, __global const unsigned int* S,
 	__global unsigned char* outputText, unsigned long int fileLength, unsigned long int numberOfThreads)
-{
-	
+{	
 	
 	unsigned long int id = get_global_id(0);
 

@@ -658,7 +658,8 @@ int main(int argc, char *argv[])
 	}
 
 	// create queue
-	cl_command_queue cmd_queue = clCreateCommandQueue(context, device, 0, &status);
+	//cl_command_queue cmd_queue = clCreateCommandQueue(context, device, 0, &status); // without profiling enabled
+	cl_command_queue cmd_queue = clCreateCommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &status);
 
 	auto timestampOpenCLinit = chrono::high_resolution_clock::now(); // time capture	
 	auto openCLinit = FpMilliseconds(timestampOpenCLinit - timestampFileLoaded);
@@ -671,7 +672,7 @@ int main(int argc, char *argv[])
 
 
 	// load opencl source
-	ifstream cl_file("kernel-blowfish-encrypt.cl");
+	ifstream cl_file("kernel-blowfish-encrypt-uno.cl");
 	if (cl_file.fail())
 	{
 		cout << "Error opening kernel file!" << endl;
@@ -714,7 +715,7 @@ int main(int argc, char *argv[])
 	auto kernelLoaded = FpMilliseconds(timestampLoadKernel - timestampOpenCLinit);
 	if (debug)
 	{
-		cout << "Kernel loaded and compiled in\t" << kernelLoaded.count() << " ms." << endl;
+		cout << "Kernel load&compile:\t" << kernelLoaded.count() << " ms." << endl;
 	}
 	else
 		cout << kernelLoaded.count() << ";";
@@ -747,18 +748,15 @@ int main(int argc, char *argv[])
 
 	
 	// execute kernel
-	auto timestampKernerlExecutionStart = chrono::high_resolution_clock::now(); // time capture	
+	auto timestampKernelExecutionStart = chrono::high_resolution_clock::now(); // time capture	
 	cl_event event;
 	status = clEnqueueNDRangeKernel(cmd_queue, kernel, dimensions, offset, global_threads, local_threads, 0, NULL, &event);
 	clWaitForEvents(1, &event); // wait for finish
 
+	// time capture
 	auto timestampKernerlExecutionStop = chrono::high_resolution_clock::now(); // time capture	
-	auto kernelExecution = FpMilliseconds(timestampKernerlExecutionStop - timestampKernerlExecutionStart);
+	auto totalKernelExecution = FpMilliseconds(timestampKernerlExecutionStop - timestampKernelExecutionStart);
 
-	if (debug)
-		cout << "Kernel execution time:\t" << kernelExecution.count() << " ms." << endl;
-	else
-		cout << kernelExecution.count() << ";";
 
 
 	// copy results to host
@@ -767,13 +765,34 @@ int main(int argc, char *argv[])
 	// finalize
 	clFinish(cmd_queue);
 
+
+
+	// OpenCl time measure test on device
+	cl_ulong timeStart, timeEnd = 0;
+	cl_double kernelComputationTime = 0;
+	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(timeStart), &timeStart, NULL);
+	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(timeEnd), &timeEnd, NULL);
+	kernelComputationTime = (double)(timeEnd - timeStart) / 1000000; // conversion form nanoseconds to miliseconds
+
+
 	auto timestampEncrypted = chrono::high_resolution_clock::now(); // time capture	
 	auto encryptionTime = FpMilliseconds(timestampEncrypted - timestampLoadKernel);
 
 	if (debug)
-		cout << "Memory transfer time in\t" << encryptionTime.count() - kernelExecution.count() << " ms." << endl;
+	{
+		cout << "Total kernel execution:\t" << totalKernelExecution.count() << " ms." << endl;
+		cout << "Memory transfer:\t" << encryptionTime.count() - totalKernelExecution.count() << " ms." << endl;
+		cout << "Kernel computation:\t" << kernelComputationTime << " ms." << endl;
+		cout << "QueueHandling & other:\t" << totalKernelExecution.count() - kernelComputationTime - (encryptionTime.count() - totalKernelExecution.count())<< " ms." << endl;
+	}
+		
 	else
-		cout << encryptionTime.count() - kernelExecution.count() << ";";
+	{		
+		cout << kernelComputationTime << ";"; // kernel computation
+		cout << encryptionTime.count() - totalKernelExecution.count() << ";"; // memory transfer
+		cout << totalKernelExecution.count() - kernelComputationTime - (encryptionTime.count() - totalKernelExecution.count()) << ";"; // queue and NDrange handling and other
+	}		
+	
 	
 
 	// cleanup
