@@ -25,7 +25,7 @@
 /*
 * F function
 */
-static unsigned int F(__global const unsigned int *S, unsigned int x)
+static unsigned int F(const unsigned int *S, unsigned int x)
 {
 	unsigned short a, b, c, d;
 	unsigned int  y;
@@ -47,6 +47,9 @@ static unsigned int F(__global const unsigned int *S, unsigned int x)
 
 
 
+
+
+
 __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global const unsigned int* P, __global const unsigned int* S,
 	__global unsigned char* outputText, unsigned long int fileLength, unsigned long int numberOfThreads)
 {	
@@ -56,14 +59,25 @@ __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global
 	uchar inputBlock[8] = { ' ' };
 	uchar outputBlock[8] = { ' ' };
 
+	// private data cache
+	unsigned int P_prv[BLOWFISH_ROUNDS + 2];
+	unsigned int S_prv[S_ROWS * S_COLUMNS];
+	// private memory caching
+	for (int i = 0; i < BLOWFISH_ROUNDS + 2; i++)
+	{
+		P_prv[i] = P[i];
+	}
+	for (int i = 0; i < S_ROWS * S_COLUMNS; i++)
+	{
+		S_prv[i] = S[i];
+	}	
+
 
 	//for (unsigned long int n = id; n < fileLength; n += (numberOfThreads + 8))
 	if (id < fileLength / 8)
 	{
 
 		unsigned long int block_id = id * 8;
-		//unsigned long int block_id = n * 8;
-		//unsigned long int block_id = n;
 
 		// input block preparation
 		for (int j = 0; j < 8; ++j)
@@ -80,8 +94,8 @@ __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global
 
 		for (i = 0; i < BLOWFISH_ROUNDS; ++i)
 		{
-			Xl = Xl ^ P[i];
-			Xr = F(S, Xl) ^ Xr;
+			Xl = Xl ^ P_prv[i];
+			Xr = F(S_prv, Xl) ^ Xr;
 
 			temp = Xl;
 			Xl = Xr;
@@ -92,15 +106,13 @@ __kernel void blowfish_encrypt(__global const unsigned char* inputText, __global
 		Xl = Xr;
 		Xr = temp;
 
-		Xr = Xr ^ P[BLOWFISH_ROUNDS];
-		Xl = Xl ^ P[BLOWFISH_ROUNDS + 1];
+		Xr = Xr ^ P_prv[BLOWFISH_ROUNDS];
+		Xl = Xl ^ P_prv[BLOWFISH_ROUNDS + 1];
 
 		PUT_UINT32_BE(Xl, outputBlock, 0);
 		PUT_UINT32_BE(Xr, outputBlock, 4);
 
 
-
-		// cpu error
 		// output text prerparation
 		for (int j = 0; j < 8; ++j)
 		{
