@@ -35,23 +35,19 @@ void startTime()
 	TIMECAPS ptc;
 	UINT cbtc = 8;
 	MMRESULT result = timeGetDevCaps(&ptc, cbtc);
-	if (result != TIMERR_NOERROR)
-	{
-		cout << "result = TIMER ERROR" << endl;
-	}
 }
 
 unsigned int calculateElapsedTime()
 {
 	if (timerFreq_.QuadPart == 0)
 	{
-		return -1;
+		return 0;
 	}
 	else
 	{
 		LARGE_INTEGER c;
 		QueryPerformanceCounter(&c);
-		return static_cast<unsigned int>((c.QuadPart - counterAtStart_.QuadPart) * 1000 / timerFreq_.QuadPart);
+		return static_cast<unsigned int>(abs((c.QuadPart - counterAtStart_.QuadPart)) * 1000 / timerFreq_.QuadPart);
 	}
 }
 
