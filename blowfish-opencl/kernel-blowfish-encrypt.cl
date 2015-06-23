@@ -1,4 +1,4 @@
-#define BLOWFISH_BLOCKSIZE	8 
+#define BLOWFISH_ROUNDS		16 
 #define S_ROWS				4
 #define S_COLUMNS			256	
 

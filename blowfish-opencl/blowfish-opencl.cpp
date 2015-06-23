@@ -23,7 +23,6 @@ bool debug = false; // if true, additional messages are displayed. If false, out
 uint32_t P[BLOWFISH_ROUNDS + 2] = { 0 };    // Blowfish round keys
 uint32_t S[S_ROWS * S_COLUMNS] = { 0 };     // key dependent S-boxes
 
-
 // time measurement for higher precision
 LARGE_INTEGER timerFreq_;
 LARGE_INTEGER counterAtStart_;
@@ -338,6 +337,7 @@ static const uint32_t Svalues[4][256] = {
 		0xB74E6132L, 0xCE77E25BL, 0x578FDFE3L, 0x3AC372E6L }
 };
 
+
 /*
 * F function
 */
@@ -548,7 +548,6 @@ void printBlock(const unsigned char *block)
 
 
 
-
 int main(int argc, char *argv[])
 {
 	// time measurement
@@ -580,22 +579,19 @@ int main(int argc, char *argv[])
 	unsigned char in[BLOWFISH_BLOCKSIZE] = { ' ' };
 	unsigned char out[BLOWFISH_BLOCKSIZE] = { ' ' };
 
-
 	// config input/output files:
-	string plainFilename = "input-16k.txt";
+	string plainFilename = "input-512m.txt";
 	if (argc > 1)
 	{
 		plainFilename = argv[1];
 	}
 	string cryptedFilename = "crypted-" + plainFilename;
 
-
 	// load file into memory
 	if (debug)
 	{
 		cout << "Blowfish encryption of file: " << plainFilename << "." << endl;
 	}
-
 	ifstream input;
 	unsigned long int fileLength = 0;
 	char *inputText;
@@ -651,7 +647,6 @@ int main(int argc, char *argv[])
 		cout << fileLoading.count() << ";";
 
 
-
 	// =============== OpenCL Part ====================
 
 	// thread config
@@ -669,7 +664,7 @@ int main(int argc, char *argv[])
 	}
 	vector<cl_platform_id> platforms(num_platforms);
 	status = clGetPlatformIDs(num_platforms, &platforms.front(), NULL);
-	const cl_device_type kDeviceType = CL_DEVICE_TYPE_GPU; // get GPU device
+	const cl_device_type kDeviceType = CL_DEVICE_TYPE_CPU; // get GPU device
 	cl_device_id device;
 	cl_platform_id platform;
 	bool found = false;
@@ -705,9 +700,8 @@ int main(int argc, char *argv[])
 	else
 		cout << openCLinit.count() << ";";
 
-
 	// load opencl source
-	ifstream cl_file("kernel-blowfish-encrypt-local.cl");
+	ifstream cl_file("kernel-blowfish-encrypt.cl");
 	if (cl_file.fail())
 	{
 		cout << "Error opening kernel file!" << endl;
@@ -753,8 +747,7 @@ int main(int argc, char *argv[])
 		cout << "Kernel load&compile:\t" << kernelLoaded.count() << " ms." << endl;
 	}
 	else
-		cout << kernelLoaded.count() << ";";
-	
+		cout << kernelLoaded.count() << ";";	
 
 
 	// ENCRYPTION
@@ -762,8 +755,7 @@ int main(int argc, char *argv[])
 	cl_mem in_text = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uchar) * extendedFileLength, inputText, NULL);
 	cl_mem in_P = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uint) * (BLOWFISH_ROUNDS + 2), P, NULL);
 	cl_mem in_S = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cl_uint) * 4 * 256, S, NULL);
-	cl_mem out_text = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uchar) * extendedFileLength, NULL, NULL);
-	
+	cl_mem out_text = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uchar) * extendedFileLength, NULL, NULL);	
 	
 	// send parameters to kernel
 	const cl_ulong cl_fileLength = extendedFileLength;
@@ -780,7 +772,6 @@ int main(int argc, char *argv[])
 	size_t offset[dimensions] = { 0 };
 	size_t global_threads[dimensions] = { numberOfThreads };
 	size_t local_threads[dimensions] = { threadsGroupSize };
-
 	
 	// execute kernel
 	auto timestampKernelExecutionStart = chrono::high_resolution_clock::now(); // time capture	
@@ -792,23 +783,18 @@ int main(int argc, char *argv[])
 	auto timestampKernerlExecutionStop = chrono::high_resolution_clock::now(); // time capture	
 	auto totalKernelExecution = FpMilliseconds(timestampKernerlExecutionStop - timestampKernelExecutionStart);
 
-
-
 	// copy results to host
 	status = clEnqueueReadBuffer(cmd_queue, out_text, CL_TRUE, 0, extendedFileLength * sizeof(cl_uchar), outputText, 0, NULL, NULL);
 
 	// finalize
 	clFinish(cmd_queue);
 
-
-
 	// OpenCl time measure test on device
 	cl_ulong timeStart, timeEnd = 0;
 	cl_double kernelComputationTime = 0;
 	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(timeStart), &timeStart, NULL);
 	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(timeEnd), &timeEnd, NULL);
-	kernelComputationTime = (double)(timeEnd - timeStart) / 1000000; // conversion form nanoseconds to miliseconds
-
+	kernelComputationTime = (double)(timeEnd - timeStart) / 1000000; // conversion from nanoseconds to miliseconds
 
 	auto timestampEncrypted = chrono::high_resolution_clock::now(); // time capture	
 	auto encryptionTime = FpMilliseconds(timestampEncrypted - timestampLoadKernel);
@@ -819,16 +805,13 @@ int main(int argc, char *argv[])
 		cout << "Memory transfer:\t" << encryptionTime.count() - totalKernelExecution.count() << " ms." << endl;
 		cout << "Kernel computation:\t" << kernelComputationTime << " ms." << endl;
 		cout << "QueueHandling & other:\t" << totalKernelExecution.count() - kernelComputationTime - (encryptionTime.count() - totalKernelExecution.count())<< " ms." << endl;
-	}
-		
+	}		
 	else
 	{		
 		cout << kernelComputationTime << ";"; // kernel computation
 		cout << encryptionTime.count() - totalKernelExecution.count() << ";"; // memory transfer
 		cout << encryptionTime.count() - kernelComputationTime - (encryptionTime.count() - totalKernelExecution.count()) << ";"; // queue and NDrange handling and other
-	}		
-	
-	
+	}	
 
 	// cleanup
 	clReleaseMemObject(in_text);
@@ -838,22 +821,17 @@ int main(int argc, char *argv[])
 	clReleaseKernel(kernel);
 	clReleaseProgram(program);
 	clReleaseCommandQueue(cmd_queue);
-	clReleaseContext(context);
-				
+	clReleaseContext(context);				
 	
 	auto timestampOpenCLfinish = chrono::high_resolution_clock::now(); // time capture	
 	auto OpenCLfinalize = FpMilliseconds(timestampOpenCLfinish - timestampEncrypted);
 
 	if (debug)
 		cout << "OpenCL finalized in\t" << OpenCLfinalize.count() << " ms." << endl;
-	
-	
-
 
 
 	// ============== OpenCL Part END ==================
-
-
+	
 	// Save result to file			
 	ofstream output;
 	output.open(cryptedFilename, ios::binary);
@@ -893,4 +871,3 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-
